@@ -41,6 +41,15 @@ function shuffleArray<T>(items: T[]): T[] {
   return copy;
 }
 
+function stripVietnameseTones(str: string): string {
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase();
+}
+
 export function GameScreen({
   words,
   settings,
@@ -56,12 +65,24 @@ export function GameScreen({
   const [wrongShake, setWrongShake] = useState(false);
   const [dizzyHitKey, setDizzyHitKey] = useState(0);
   const [muted, setMuted] = useState(soundEngine.muted);
-  const [hudState, setHudState] = useState({
+  const [hudState, setHudState] = useState<{
+    correct: number;
+    skipped: number;
+    missed: number;
+    remaining: number;
+    targetPrompt: string;
+    targetPromptLang: 'vi' | 'en';
+    targetTypedCount: number;
+    targetTotalLength: number;
+    heartsLeft: number;
+    maxHearts: number;
+  }>({
     correct: 0,
     skipped: 0,
     missed: 0,
     remaining: words.length,
-    targetVietnamese: '',
+    targetPrompt: '',
+    targetPromptLang: 'vi',
     targetTypedCount: 0,
     targetTotalLength: 0,
     heartsLeft: isMedium ? settings.mediumHearts : 0,
@@ -136,7 +157,9 @@ export function GameScreen({
       if (isMedium) {
         setInputValue('');
       } else {
-        setInputValue(closest ? closest.word.english.slice(0, closest.typedCount) : '');
+        setInputValue(
+          closest ? closest.answerText.normalize('NFC').slice(0, closest.typedCount) : ''
+        );
       }
     }
 
@@ -146,9 +169,10 @@ export function GameScreen({
       skipped: eng.skippedCount,
       missed: eng.missedCount,
       remaining: Math.max(0, words.length - resolved),
-      targetVietnamese: closest ? closest.word.vietnamese : '',
+      targetPrompt: closest ? closest.promptText : '',
+      targetPromptLang: closest ? closest.promptLang : 'vi',
       targetTypedCount: closest ? closest.typedCount : 0,
-      targetTotalLength: closest ? closest.word.english.length : 0,
+      targetTotalLength: closest ? closest.answerText.normalize('NFC').length : 0,
       heartsLeft: eng.heartsLeft,
       maxHearts: isMedium ? settings.mediumHearts : 0,
     });
@@ -163,13 +187,22 @@ export function GameScreen({
     if (!ctx) return;
 
     const word = eng.pendingQueue.shift()!;
+    const promptLang: 'vi' | 'en' =
+      settings.fallLanguage === 'random'
+        ? Math.random() < 0.5
+          ? 'vi'
+          : 'en'
+        : settings.fallLanguage;
+    const promptText = promptLang === 'vi' ? word.vietnamese : word.english;
+    const answerText = promptLang === 'vi' ? word.english : word.vietnamese;
+
     ctx.font = 'bold 17px "Patrick Hand", cursive, sans-serif';
     const rect = canvas.getBoundingClientRect();
     const pageRedLine = window.innerWidth < 640 ? 30 : 66;
     const leftMargin = Math.max(14, pageRedLine - rect.left);
     const rightMargin = 14;
     const maxTextWidth = Math.min(170, Math.max(96, eng.width - leftMargin - rightMargin - 36));
-    const lines = wrapVietnameseText(ctx, word.vietnamese, maxTextWidth);
+    const lines = wrapVietnameseText(ctx, promptText, maxTextWidth);
 
     let maxLineW = 0;
     for (const line of lines) {
@@ -233,6 +266,9 @@ export function GameScreen({
     eng.blocks.push({
       uid: `${word.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       word,
+      promptLang,
+      promptText,
+      answerText,
       x: bestX,
       y: spawnY,
       width: blockW,
@@ -245,7 +281,7 @@ export function GameScreen({
       hitJitter: 0,
       lines,
     });
-  }, [isMedium, settings.mediumSpeedMultiplier]);
+  }, [isMedium, settings.fallLanguage, settings.mediumSpeedMultiplier]);
 
   const getActiveTarget = (): FallingBlock | null => {
     const eng = engineRef.current;
@@ -378,7 +414,7 @@ export function GameScreen({
     const typed = inputValue.trim().replace(/\s+/g, ' ');
     if (!typed) return;
 
-    if (typed.toLowerCase() === target.word.english.trim().toLowerCase()) {
+    if (typed.normalize('NFC').toLowerCase() === target.answerText.trim().normalize('NFC').toLowerCase()) {
       // Correct full word -> fire big cannon rocket!
       target.pendingDestroy = true;
       eng.correctCount += 1;
@@ -438,7 +474,92 @@ export function GameScreen({
       return;
     }
 
-    const expected = target.word.english;
+    // Vietnamese answer mode in Easy: allow natural OS IME / Telex composition while firing per matched character
+    if (target.promptLang === 'en') {
+      const expected = target.answerText.trim().replace(/\s+/g, ' ').normalize('NFC');
+      const nextRaw = e.target.value;
+      const nextVal = nextRaw.normalize('NFC');
+      const isComposing = Boolean((e.nativeEvent as InputEvent).isComposing);
+
+      let matchedLen = 0;
+      while (
+        matchedLen < nextVal.length &&
+        matchedLen < expected.length &&
+        nextVal[matchedLen].toLowerCase() === expected[matchedLen].toLowerCase()
+      ) {
+        matchedLen += 1;
+      }
+
+      if (matchedLen > target.typedCount) {
+        const newlyMatched = matchedLen - target.typedCount;
+        target.typedCount = matchedLen;
+        const shotsToFire = Math.min(3, newlyMatched);
+        for (let i = 0; i < shotsToFire; i++) {
+          soundEngine.playShoot();
+          const shipX = eng.width / 2;
+          const shipY = eng.height - 26;
+          const angle = Math.atan2(target.y - shipY, target.x - shipX);
+          eng.shipAngle = angle;
+          eng.shipRecoil = 7.5;
+
+          const bulletSpeed = 1350;
+          eng.bullets.push({
+            id: `b-${Date.now()}-${Math.random()}-${i}`,
+            x: shipX + Math.cos(angle) * 24,
+            y: shipY + Math.sin(angle) * 24,
+            vx: Math.cos(angle) * bulletSpeed,
+            vy: Math.sin(angle) * bulletSpeed,
+            targetUid: target.uid,
+            angle,
+            color: '#1e293b',
+          });
+        }
+
+        if (matchedLen >= expected.length) {
+          eng.correctCount += 1;
+          eng.explosions.push({
+            id: `exp-${Date.now()}-${Math.random()}`,
+            x: target.x,
+            y: target.y,
+            progress: 0,
+            seed: Math.random() * 999,
+            kind: 'destroy',
+            label: expected,
+          });
+          eng.blocks = eng.blocks.filter((b) => b.uid !== target.uid);
+          eng.currentTargetUid = null;
+          soundEngine.playDestroy();
+          setInputValue('');
+          syncHud();
+          return;
+        }
+
+        setInputValue(nextRaw);
+        syncHud();
+        return;
+      }
+
+      if (isComposing || nextVal.length < inputValue.normalize('NFC').length) {
+        setInputValue(nextRaw);
+        syncHud();
+        return;
+      }
+
+      const expectedBase = stripVietnameseTones(expected);
+      const nextBase = stripVietnameseTones(nextVal);
+      if (expectedBase.startsWith(nextBase)) {
+        // Still composing accents/tones on a valid Vietnamese base prefix
+        setInputValue(nextRaw);
+      } else {
+        triggerWrongFeedback();
+        spawnWrongDefenderShot(target, false);
+        setInputValue(inputValue);
+      }
+      syncHud();
+      return;
+    }
+
+    const expected = target.answerText;
     const validPrefix = expected.slice(0, target.typedCount);
     const nextVal = e.target.value;
 
@@ -881,7 +1002,7 @@ export function GameScreen({
                     progress: 0,
                     seed: Math.random() * 999,
                     kind: 'destroy',
-                    label: dest.word.english,
+                    label: dest.answerText,
                   });
                   eng.blocks = eng.blocks.filter((b) => b.uid !== dest.uid);
                   soundEngine.playDestroy();
@@ -1114,23 +1235,27 @@ export function GameScreen({
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 placeholder={
-                  hudState.targetVietnamese
+                  hudState.targetPrompt
                     ? isMedium
-                      ? `Nhập đủ "${hudState.targetVietnamese}" rồi Enter...`
-                      : `Gõ tiếng Anh cho "${hudState.targetVietnamese}"...`
+                      ? hudState.targetPromptLang === 'en'
+                        ? `Nhập đủ nghĩa Việt cho "${hudState.targetPrompt}" rồi Enter...`
+                        : `Nhập đủ tiếng Anh cho "${hudState.targetPrompt}" rồi Enter...`
+                      : hudState.targetPromptLang === 'en'
+                      ? `Gõ nghĩa tiếng Việt cho "${hudState.targetPrompt}"...`
+                      : `Gõ tiếng Anh cho "${hudState.targetPrompt}"...`
                     : 'Đang chuẩn bị mục tiêu...'
                 }
-                aria-label="Nhập từ tiếng Anh tương ứng với mục tiêu"
+                aria-label="Nhập đáp án tương ứng với mục tiêu"
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
-                lang="en"
+                lang={hudState.targetPromptLang === 'en' ? 'vi' : 'en'}
                 className={`sketch-input w-full pl-3 ${isMedium ? 'pr-3' : 'pr-12'} py-1 text-base sm:text-lg font-bold tracking-wide text-slate-900 placeholder:text-slate-500 placeholder:font-normal ${
                   wrongShake ? 'border-red-600 bg-red-50/90' : ''
                 }`}
               />
-              {!isMedium && hudState.targetVietnamese && (
+              {!isMedium && hudState.targetPrompt && (
                 <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 tabular-nums">
                   {hudState.targetTypedCount}/{hudState.targetTotalLength}
                 </span>
@@ -1144,7 +1269,7 @@ export function GameScreen({
                   e.stopPropagation();
                   handleMediumSubmit();
                 }}
-                disabled={!hudState.targetVietnamese || !inputValue.trim()}
+                disabled={!hudState.targetPrompt || !inputValue.trim()}
                 title="Bắn đạn lớn (phím Enter)"
                 className="sketch-btn bg-sky-200 hover:bg-sky-300 text-slate-900 font-display text-sm px-3 py-1 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
               >
@@ -1159,7 +1284,7 @@ export function GameScreen({
                 e.stopPropagation();
                 handleSkip();
               }}
-              disabled={!hudState.targetVietnamese}
+              disabled={!hudState.targetPrompt}
               title="Bỏ qua từ này (phím Tab)"
               className="sketch-btn bg-amber-200 hover:bg-amber-300 text-slate-900 font-display text-sm px-3 py-1 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
             >

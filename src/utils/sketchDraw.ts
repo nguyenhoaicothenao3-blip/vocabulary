@@ -162,8 +162,9 @@ export function drawFallingBlock(
 
   // Show already-typed correct prefix letters as ink feedback on the block (never spoils remaining letters)
   if (hasTyped) {
-    const typedStr = block.word.english.slice(0, block.typedCount);
-    const totalLen = block.word.english.length;
+    const answerNfc = block.answerText.normalize('NFC');
+    const typedStr = answerNfc.slice(0, block.typedCount);
+    const totalLen = answerNfc.length;
     const remainingDots = Math.max(0, totalLen - block.typedCount);
     const progressText = `${typedStr}${'·'.repeat(Math.min(remainingDots, 6))}`;
 

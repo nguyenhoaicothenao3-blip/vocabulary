@@ -8,14 +8,18 @@ export type AppScreen = 'SETUP' | 'PLAYING' | 'SUMMARY';
 
 export type DifficultyMode = 'easy' | 'medium';
 
+export type FallLanguageMode = 'vi' | 'en' | 'random';
+
 export interface GameSettings {
   mode: DifficultyMode;
+  fallLanguage: FallLanguageMode;
   mediumHearts: number; // number of mistakes allowed in medium mode
   mediumSpeedMultiplier: number; // e.g., 1.2 to 2.5 faster than easy mode
 }
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
   mode: 'easy',
+  fallLanguage: 'vi',
   mediumHearts: 3,
   mediumSpeedMultiplier: 1.5,
 };
@@ -38,6 +42,9 @@ export const MARKER_COLORS: BlockColor[] = [
 export interface FallingBlock {
   uid: string;
   word: VocabWord;
+  promptLang: 'vi' | 'en';
+  promptText: string;
+  answerText: string;
   x: number; // center x
   y: number; // center y
   width: number;

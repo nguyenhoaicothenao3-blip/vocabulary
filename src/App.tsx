@@ -40,6 +40,10 @@ function loadInitialSettings(): GameSettings {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
       const mode = parsed.mode === 'medium' ? 'medium' : 'easy';
+      const fallLanguage =
+        parsed.fallLanguage === 'en' || parsed.fallLanguage === 'random'
+          ? parsed.fallLanguage
+          : 'vi';
       const mediumHearts =
         typeof parsed.mediumHearts === 'number'
           ? Math.max(1, Math.min(10, Math.round(parsed.mediumHearts)))
@@ -48,7 +52,7 @@ function loadInitialSettings(): GameSettings {
         typeof parsed.mediumSpeedMultiplier === 'number'
           ? Math.max(1.2, Math.min(2.5, Number(parsed.mediumSpeedMultiplier.toFixed(1))))
           : DEFAULT_GAME_SETTINGS.mediumSpeedMultiplier;
-      return { mode, mediumHearts, mediumSpeedMultiplier };
+      return { mode, fallLanguage, mediumHearts, mediumSpeedMultiplier };
     }
   } catch {
     // Ignore parse errors
@@ -86,6 +90,39 @@ export default function App() {
       vietnamese,
     };
     setWords((prev) => [newWord, ...prev]);
+  };
+
+  const handleAddWordsBulk = (
+    entries: Array<{ english: string; vietnamese: string }>
+  ): { addedCount: number; duplicateCount: number } => {
+    const existingLower = new Set(words.map((w) => w.english.toLowerCase()));
+    const newItems: VocabWord[] = [];
+    let duplicateCount = 0;
+    const baseTime = Date.now();
+
+    entries.forEach((entry, idx) => {
+      const cleanEn = entry.english.trim().replace(/\s+/g, ' ');
+      const cleanVi = entry.vietnamese.trim().replace(/\s+/g, ' ');
+      if (!cleanEn || !cleanVi) return;
+
+      const key = cleanEn.toLowerCase();
+      if (existingLower.has(key)) {
+        duplicateCount += 1;
+        return;
+      }
+      existingLower.add(key);
+      newItems.push({
+        id: `word-${baseTime}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+        english: cleanEn,
+        vietnamese: cleanVi,
+      });
+    });
+
+    if (newItems.length > 0) {
+      setWords((prev) => [...newItems, ...prev]);
+    }
+
+    return { addedCount: newItems.length, duplicateCount };
   };
 
   const handleDeleteWord = (id: string) => {
@@ -156,6 +193,7 @@ export default function App() {
       settings={settings}
       onUpdateSettings={setSettings}
       onAddWord={handleAddWord}
+      onAddWordsBulk={handleAddWordsBulk}
       onDeleteWord={handleDeleteWord}
       onClearAll={handleClearAll}
       onLoadStarter={handleLoadStarter}
