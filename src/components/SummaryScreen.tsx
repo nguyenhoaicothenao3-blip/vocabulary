@@ -24,12 +24,16 @@ export function SummaryScreen({
           <div className="flex items-center gap-3">
             <DoodleStar className="w-9 h-9 -rotate-6 shrink-0" />
             <h1 className="text-3xl sm:text-4xl font-bold text-slate-900">
-              Kết thúc lượt chơi
+              {result.outOfHearts ? 'Hết tim mất rồi!' : 'Kết thúc lượt chơi'}
             </h1>
           </div>
           <RedUnderlineSvg className="w-52 h-3 mt-0.5 mb-2" />
           <p className="text-lg text-slate-700">
-            Tổng hợp kết quả và những từ vựng cần ôn lại trong trang vở hôm nay.
+            {result.outOfHearts
+              ? 'Bạn đã dùng hết số tim trong chế độ Trung bình. Hãy ôn lại các từ bên dưới nhé!'
+              : result.mode === 'medium'
+              ? `Hoàn thành chế độ Trung bình (còn ${result.remainingHearts ?? 0}/${result.maxHearts ?? 0} tim).`
+              : 'Tổng hợp kết quả và những từ vựng cần ôn lại trong trang vở hôm nay.'}
           </p>
         </header>
 
@@ -106,10 +110,18 @@ export function SummaryScreen({
 
                   <span
                     className={`text-sm font-bold whitespace-nowrap shrink-0 ${
-                      item.reason === 'skipped' ? 'text-amber-700' : 'text-red-600'
+                      item.reason === 'skipped'
+                        ? 'text-amber-700'
+                        : item.reason === 'out_of_hearts'
+                        ? 'text-slate-600'
+                        : 'text-red-600'
                     }`}
                   >
-                    {item.reason === 'skipped' ? 'Đã bỏ qua' : 'Rơi chạm đáy'}
+                    {item.reason === 'skipped'
+                      ? 'Đã bỏ qua'
+                      : item.reason === 'out_of_hearts'
+                      ? 'Chưa kịp bắn'
+                      : 'Rơi chạm đáy'}
                   </span>
                 </li>
               ))}

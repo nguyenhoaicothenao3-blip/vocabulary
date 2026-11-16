@@ -6,6 +6,20 @@ export interface VocabWord {
 
 export type AppScreen = 'SETUP' | 'PLAYING' | 'SUMMARY';
 
+export type DifficultyMode = 'easy' | 'medium';
+
+export interface GameSettings {
+  mode: DifficultyMode;
+  mediumHearts: number; // number of mistakes allowed in medium mode
+  mediumSpeedMultiplier: number; // e.g., 1.2 to 2.5 faster than easy mode
+}
+
+export const DEFAULT_GAME_SETTINGS: GameSettings = {
+  mode: 'easy',
+  mediumHearts: 3,
+  mediumSpeedMultiplier: 1.5,
+};
+
 export interface BlockColor {
   fill: string;
   wash: string;
@@ -34,6 +48,7 @@ export interface FallingBlock {
   color: BlockColor;
   typedCount: number;
   hitJitter: number; // decays over time when hit by bullet
+  pendingDestroy?: boolean; // true while final large bullet is in flight in medium mode
   lines: string[];
 }
 
@@ -48,6 +63,8 @@ export interface InkBullet {
   targetUid: string;
   angle: number;
   color: string;
+  isLarge?: boolean;
+  destroyOnHit?: boolean;
   isWrong?: boolean;
   deflected?: boolean;
   frozen?: boolean;
@@ -94,14 +111,18 @@ export interface DoodleExplosion {
 
 export interface ReviewItem {
   word: VocabWord;
-  reason: 'skipped' | 'missed';
+  reason: 'skipped' | 'missed' | 'out_of_hearts';
 }
 
 export interface GameResult {
+  mode: DifficultyMode;
   totalWords: number;
   correctCount: number;
   skippedCount: number;
   missedCount: number;
+  outOfHearts?: boolean;
+  remainingHearts?: number;
+  maxHearts?: number;
   reviewItems: ReviewItem[];
 }
 

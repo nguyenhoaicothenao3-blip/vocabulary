@@ -1,10 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
-import { MARKER_COLORS, STARTER_VOCAB, VocabWord } from '../types/vocab';
+import { Heart, Minus, Play, Plus, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { GameSettings, MARKER_COLORS, STARTER_VOCAB, VocabWord } from '../types/vocab';
 import { DoodleRocketLogo, NotebookBinderHoles, RedUnderlineSvg } from './DoodleDecoration';
 
 interface SetupScreenProps {
   words: VocabWord[];
+  settings: GameSettings;
+  onUpdateSettings: (next: GameSettings) => void;
   onAddWord: (english: string, vietnamese: string) => void;
   onDeleteWord: (id: string) => void;
   onClearAll: () => void;
@@ -14,6 +16,8 @@ interface SetupScreenProps {
 
 export function SetupScreen({
   words,
+  settings,
+  onUpdateSettings,
   onAddWord,
   onDeleteWord,
   onClearAll,
@@ -85,104 +89,245 @@ export function SetupScreen({
 
         {/* Main 2-column notebook spread */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Left: Add word form */}
-          <section className="lg:col-span-5 sketch-box bg-[#fffdf7] p-5 sm:p-6 relative">
-            {/* Decorative masking tape strip */}
-            <div
-              aria-hidden="true"
-              className="w-24 h-5 bg-amber-200/75 border border-amber-400/50 -rotate-2 mx-auto -mt-8 mb-4 shadow-xs"
-            />
+          {/* Left: Add word form + Mode settings */}
+          <div className="lg:col-span-5 space-y-6">
+            <section className="sketch-box bg-[#fffdf7] p-5 sm:p-6 relative">
+              {/* Decorative masking tape strip */}
+              <div
+                aria-hidden="true"
+                className="w-24 h-5 bg-amber-200/75 border border-amber-400/50 -rotate-2 mx-auto -mt-8 mb-4 shadow-xs"
+              />
 
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">
-              Thêm từ vựng mới
-            </h2>
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">
+                Thêm từ vựng mới
+              </h2>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label
-                  htmlFor="english-word"
-                  className="block text-base font-bold text-slate-800 mb-1"
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="english-word"
+                    className="block text-base font-bold text-slate-800 mb-1"
+                  >
+                    Từ tiếng Anh
+                  </label>
+                  <input
+                    ref={englishInputRef}
+                    id="english-word"
+                    type="text"
+                    value={english}
+                    onChange={(e) => {
+                      setEnglish(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    placeholder="Ví dụ: notebook"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    className="sketch-input w-full px-3.5 py-2.5 text-lg text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="vietnamese-meaning"
+                    className="block text-base font-bold text-slate-800 mb-1"
+                  >
+                    Nghĩa tiếng Việt
+                  </label>
+                  <input
+                    id="vietnamese-meaning"
+                    type="text"
+                    value={vietnamese}
+                    onChange={(e) => {
+                      setVietnamese(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    placeholder="Ví dụ: quyển vở"
+                    autoComplete="off"
+                    className="sketch-input w-full px-3.5 py-2.5 text-lg text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+
+                {error && (
+                  <p
+                    role="alert"
+                    className="text-red-600 text-base font-bold bg-red-50 border border-red-300 rounded-lg px-3 py-2"
+                  >
+                    {error}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  className="sketch-btn w-full bg-emerald-200 hover:bg-emerald-300 text-slate-900 font-display text-lg py-2.5 px-4 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  Từ tiếng Anh
-                </label>
-                <input
-                  ref={englishInputRef}
-                  id="english-word"
-                  type="text"
-                  value={english}
-                  onChange={(e) => {
-                    setEnglish(e.target.value);
-                    if (error) setError(null);
-                  }}
-                  placeholder="Ví dụ: notebook"
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  className="sketch-input w-full px-3.5 py-2.5 text-lg text-slate-900 placeholder:text-slate-400"
-                />
-              </div>
+                  <Plus className="w-5 h-5 stroke-[2.5]" />
+                  <span>Thêm vào danh sách</span>
+                </button>
+              </form>
 
-              <div>
-                <label
-                  htmlFor="vietnamese-meaning"
-                  className="block text-base font-bold text-slate-800 mb-1"
-                >
-                  Nghĩa tiếng Việt
-                </label>
-                <input
-                  id="vietnamese-meaning"
-                  type="text"
-                  value={vietnamese}
-                  onChange={(e) => {
-                    setVietnamese(e.target.value);
-                    if (error) setError(null);
-                  }}
-                  placeholder="Ví dụ: quyển vở"
-                  autoComplete="off"
-                  className="sketch-input w-full px-3.5 py-2.5 text-lg text-slate-900 placeholder:text-slate-400"
-                />
-              </div>
-
-              {error && (
-                <p
-                  role="alert"
-                  className="text-red-600 text-base font-bold bg-red-50 border border-red-300 rounded-lg px-3 py-2"
-                >
-                  {error}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                className="sketch-btn w-full bg-emerald-200 hover:bg-emerald-300 text-slate-900 font-display text-lg py-2.5 px-4 flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Plus className="w-5 h-5 stroke-[2.5]" />
-                <span>Thêm vào danh sách</span>
-              </button>
-            </form>
-
-            {/* Quick actions */}
-            <div className="mt-5 pt-4 border-t border-dashed border-slate-300 flex flex-wrap items-center justify-between gap-2 text-sm">
-              <button
-                type="button"
-                onClick={onLoadStarter}
-                className="inline-flex items-center gap-1.5 text-blue-700 hover:text-blue-900 underline decoration-wavy underline-offset-4 cursor-pointer py-1"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Dùng {STARTER_VOCAB.length} từ mẫu</span>
-              </button>
-
-              {words.length > 0 && (
+              {/* Quick actions */}
+              <div className="mt-5 pt-4 border-t border-dashed border-slate-300 flex flex-wrap items-center justify-between gap-2 text-sm">
                 <button
                   type="button"
-                  onClick={onClearAll}
-                  className="inline-flex items-center gap-1 text-red-600 hover:text-red-800 underline underline-offset-4 cursor-pointer py-1"
+                  onClick={onLoadStarter}
+                  className="inline-flex items-center gap-1.5 text-blue-700 hover:text-blue-900 underline decoration-wavy underline-offset-4 cursor-pointer py-1"
                 >
-                  <span>Xóa hết danh sách</span>
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Dùng {STARTER_VOCAB.length} từ mẫu</span>
                 </button>
+
+                {words.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={onClearAll}
+                    className="inline-flex items-center gap-1 text-red-600 hover:text-red-800 underline underline-offset-4 cursor-pointer py-1"
+                  >
+                    <span>Xóa hết danh sách</span>
+                  </button>
+                )}
+              </div>
+            </section>
+
+            {/* Game Mode & Difficulty Settings */}
+            <section className="sketch-box bg-[#fffdf7] p-5 sm:p-6">
+              <div className="flex items-center gap-2 mb-3.5">
+                <SlidersHorizontal className="w-5 h-5 text-slate-800" />
+                <h2 className="text-xl font-bold text-slate-900">
+                  Cài đặt chế độ chơi
+                </h2>
+              </div>
+
+              {/* Segmented mode selector */}
+              <div className="grid grid-cols-2 gap-2.5 mb-4">
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ ...settings, mode: 'easy' })}
+                  className={`sketch-btn py-2 px-3 font-display text-base cursor-pointer whitespace-nowrap ${
+                    settings.mode === 'easy'
+                      ? 'bg-emerald-200 text-slate-900'
+                      : 'bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Chế độ Dễ
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ ...settings, mode: 'medium' })}
+                  className={`sketch-btn py-2 px-3 font-display text-base cursor-pointer whitespace-nowrap ${
+                    settings.mode === 'medium'
+                      ? 'bg-amber-200 text-slate-900'
+                      : 'bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Chế độ Trung bình
+                </button>
+              </div>
+
+              {settings.mode === 'easy' ? (
+                <ul className="text-base text-slate-700 space-y-1.5 list-disc pl-5">
+                  <li>Gõ đúng từng chữ cái để tàu bắn ra từng nét đạn nhỏ.</li>
+                  <li>Không giới hạn số lần gõ sai và không mất tim.</li>
+                  <li>Từ vựng rơi xuống chậm rãi, thoải mái ghi nhớ.</li>
+                </ul>
+              ) : (
+                <div className="space-y-4">
+                  <ul className="text-base text-slate-700 space-y-1 list-disc pl-5">
+                    <li>Nhập đầy đủ cả từ rồi nhấn <strong>Enter</strong> để bắn đạn đại bác lớn.</li>
+                    <li>Mỗi lần nhấn Enter sai sẽ mất 1 tim và bị người que cản đạn.</li>
+                  </ul>
+
+                  {/* Hearts count control */}
+                  <div className="pt-3 border-t border-dashed border-slate-300 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-base font-bold text-slate-800">
+                        Số lượng tim
+                      </div>
+                      <div className="text-sm text-slate-500">
+                        Giới hạn số lần nhập sai
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onUpdateSettings({
+                            ...settings,
+                            mediumHearts: Math.max(1, settings.mediumHearts - 1),
+                          })
+                        }
+                        disabled={settings.mediumHearts <= 1}
+                        aria-label="Giảm số tim"
+                        className="w-9 h-9 rounded-lg border-2 border-slate-800 bg-white hover:bg-rose-100 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                      >
+                        <Minus className="w-4 h-4" />
+                      </button>
+
+                      <span className="min-w-[3.5rem] text-center font-display font-bold text-lg text-red-600 tabular-nums inline-flex items-center justify-center gap-1">
+                        <Heart className="w-4 h-4 fill-red-500 text-red-600" />
+                        {settings.mediumHearts}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onUpdateSettings({
+                            ...settings,
+                            mediumHearts: Math.min(10, settings.mediumHearts + 1),
+                          })
+                        }
+                        disabled={settings.mediumHearts >= 10}
+                        aria-label="Tăng số tim"
+                        className="w-9 h-9 rounded-lg border-2 border-slate-800 bg-white hover:bg-emerald-100 disabled:opacity-40 flex items-center justify-center cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Speed multiplier control */}
+                  <div className="pt-3 border-t border-dashed border-slate-300">
+                    <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                      <label
+                        htmlFor="medium-speed-range"
+                        className="text-base font-bold text-slate-800"
+                      >
+                        Tốc độ rơi so với chế độ Dễ
+                      </label>
+                      <span className="font-display font-bold text-blue-700 tabular-nums text-base whitespace-nowrap">
+                        {settings.mediumSpeedMultiplier.toFixed(1)}x (+
+                        {Math.round((settings.mediumSpeedMultiplier - 1) * 100)}%)
+                      </span>
+                    </div>
+
+                    <input
+                      id="medium-speed-range"
+                      type="range"
+                      min={1.2}
+                      max={2.5}
+                      step={0.1}
+                      value={settings.mediumSpeedMultiplier}
+                      onChange={(e) =>
+                        onUpdateSettings({
+                          ...settings,
+                          mediumSpeedMultiplier: parseFloat(e.target.value),
+                        })
+                      }
+                      className="w-full accent-blue-700 cursor-pointer"
+                    />
+
+                    <div className="flex justify-between text-xs text-slate-500 tabular-nums mt-0.5">
+                      <span>1.2x (+20%)</span>
+                      <span>1.8x (+80%)</span>
+                      <span>2.5x (+150%)</span>
+                    </div>
+                  </div>
+                </div>
               )}
-            </div>
-          </section>
+            </section>
+          </div>
 
           {/* Right: Vocabulary list */}
           <section className="lg:col-span-7">

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { LogOut, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { Heart, LogOut, Send, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import {
   DoodleExplosion,
   FallingBlock,
   GameResult,
+  GameSettings,
   InkBullet,
   MARKER_COLORS,
   ReviewItem,
@@ -26,6 +27,7 @@ import { NotebookBinderHoles } from './DoodleDecoration';
 
 interface GameScreenProps {
   words: VocabWord[];
+  settings: GameSettings;
   onFinishGame: (result: GameResult) => void;
   onExitToSetup: () => void;
 }
@@ -41,15 +43,18 @@ function shuffleArray<T>(items: T[]): T[] {
 
 export function GameScreen({
   words,
+  settings,
   onFinishGame,
   onExitToSetup,
 }: GameScreenProps) {
+  const isMedium = settings.mode === 'medium';
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [inputValue, setInputValue] = useState('');
   const [wrongShake, setWrongShake] = useState(false);
+  const [dizzyHitKey, setDizzyHitKey] = useState(0);
   const [muted, setMuted] = useState(soundEngine.muted);
   const [hudState, setHudState] = useState({
     correct: 0,
@@ -59,12 +64,16 @@ export function GameScreen({
     targetVietnamese: '',
     targetTypedCount: 0,
     targetTotalLength: 0,
+    heartsLeft: isMedium ? settings.mediumHearts : 0,
+    maxHearts: isMedium ? settings.mediumHearts : 0,
   });
 
   // Mutable game engine state inside ref for smooth 60fps loop
   const engineRef = useRef<{
     initialized: boolean;
     ended: boolean;
+    outOfHearts: boolean;
+    outOfHeartsAt: number | null;
     finishScheduledAt: number | null;
     width: number;
     height: number;
@@ -77,6 +86,7 @@ export function GameScreen({
     correctCount: number;
     skippedCount: number;
     missedCount: number;
+    heartsLeft: number;
     reviewItems: ReviewItem[];
     spawnTimer: number;
     colorIdx: number;
@@ -86,6 +96,8 @@ export function GameScreen({
   }>({
     initialized: false,
     ended: false,
+    outOfHearts: false,
+    outOfHeartsAt: null,
     finishScheduledAt: null,
     width: 0,
     height: 0,
@@ -98,6 +110,7 @@ export function GameScreen({
     correctCount: 0,
     skippedCount: 0,
     missedCount: 0,
+    heartsLeft: isMedium ? settings.mediumHearts : 0,
     reviewItems: [],
     spawnTimer: 0,
     colorIdx: 0,
@@ -108,9 +121,10 @@ export function GameScreen({
 
   const syncHud = useCallback(() => {
     const eng = engineRef.current;
-    // Closest to ship = largest Y
+    // Closest non-destroying block to ship = largest Y
     let closest: FallingBlock | null = null;
     for (const b of eng.blocks) {
+      if (b.pendingDestroy) continue;
       if (!closest || b.y > closest.y) {
         closest = b;
       }
@@ -119,7 +133,11 @@ export function GameScreen({
     const newTargetUid = closest ? closest.uid : null;
     if (newTargetUid !== eng.currentTargetUid) {
       eng.currentTargetUid = newTargetUid;
-      setInputValue(closest ? closest.word.english.slice(0, closest.typedCount) : '');
+      if (isMedium) {
+        setInputValue('');
+      } else {
+        setInputValue(closest ? closest.word.english.slice(0, closest.typedCount) : '');
+      }
     }
 
     const resolved = eng.correctCount + eng.skippedCount + eng.missedCount;
@@ -131,8 +149,10 @@ export function GameScreen({
       targetVietnamese: closest ? closest.word.vietnamese : '',
       targetTypedCount: closest ? closest.typedCount : 0,
       targetTotalLength: closest ? closest.word.english.length : 0,
+      heartsLeft: eng.heartsLeft,
+      maxHearts: isMedium ? settings.mediumHearts : 0,
     });
-  }, [words.length]);
+  }, [isMedium, settings.mediumHearts, words.length]);
 
   const spawnWordBlock = useCallback((initialY?: number) => {
     const eng = engineRef.current;
@@ -204,8 +224,11 @@ export function GameScreen({
     const color = MARKER_COLORS[eng.colorIdx % MARKER_COLORS.length];
     eng.colorIdx += 1;
 
-    // Gentle fall speed across the tall playfield
-    const baseSpeed = Math.max(19, Math.min(27, eng.height * 0.036));
+    // Gentle fall speed in Easy mode, scaled by multiplier in Medium mode
+    const baseEasySpeed = Math.max(19, Math.min(27, eng.height * 0.036));
+    const speed = isMedium
+      ? baseEasySpeed * settings.mediumSpeedMultiplier
+      : baseEasySpeed;
 
     eng.blocks.push({
       uid: `${word.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -214,7 +237,7 @@ export function GameScreen({
       y: spawnY,
       width: blockW,
       height: blockH,
-      speed: baseSpeed,
+      speed,
       tilt: (Math.random() - 0.5) * 0.06,
       seed: Math.random() * 1000,
       color,
@@ -222,12 +245,13 @@ export function GameScreen({
       hitJitter: 0,
       lines,
     });
-  }, []);
+  }, [isMedium, settings.mediumSpeedMultiplier]);
 
   const getActiveTarget = (): FallingBlock | null => {
     const eng = engineRef.current;
     let closest: FallingBlock | null = null;
     for (const b of eng.blocks) {
+      if (b.pendingDestroy) continue;
       if (!closest || b.y > closest.y) {
         closest = b;
       }
@@ -237,7 +261,7 @@ export function GameScreen({
 
   const handleSkip = useCallback(() => {
     const eng = engineRef.current;
-    if (eng.ended) return;
+    if (eng.ended || eng.outOfHearts) return;
 
     const target = getActiveTarget();
     if (!target) return;
@@ -263,6 +287,14 @@ export function GameScreen({
   }, [syncHud]);
 
   const wrongTimerRef = useRef<number | null>(null);
+  const dizzyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (wrongTimerRef.current !== null) window.clearTimeout(wrongTimerRef.current);
+      if (dizzyTimerRef.current !== null) window.clearTimeout(dizzyTimerRef.current);
+    };
+  }, []);
 
   const triggerWrongFeedback = useCallback(() => {
     soundEngine.playWrongKey();
@@ -270,22 +302,139 @@ export function GameScreen({
     if (wrongTimerRef.current !== null) {
       window.clearTimeout(wrongTimerRef.current);
     }
+    if (dizzyTimerRef.current !== null) {
+      window.clearTimeout(dizzyTimerRef.current);
+    }
     requestAnimationFrame(() => {
       setWrongShake(true);
+      setDizzyHitKey((k) => k + 1);
       wrongTimerRef.current = window.setTimeout(() => {
         setWrongShake(false);
         wrongTimerRef.current = null;
-      }, 280);
+      }, 470);
+      dizzyTimerRef.current = window.setTimeout(() => {
+        setDizzyHitKey(0);
+        dizzyTimerRef.current = null;
+      }, 920);
     });
   }, []);
 
+  const spawnWrongDefenderShot = useCallback((target: FallingBlock, isLargeBullet: boolean) => {
+    const eng = engineRef.current;
+    const shipX = eng.width / 2;
+    const shipY = eng.height - 26;
+    const angle = Math.atan2(target.y - shipY, target.x - shipX);
+    eng.shipAngle = angle;
+    eng.shipRecoil = isLargeBullet ? 9 : 6;
+    soundEngine.playShoot();
+
+    const defenderKinds: StickDefenderKind[] = ['sword', 'shield', 'wand', 'ninja'];
+    const defenderKind = defenderKinds[Math.floor(Math.random() * defenderKinds.length)];
+    const guardDist = target.height / 2 + 24;
+    const sideNudge = Math.abs(Math.cos(angle)) < 0.2 ? (Math.random() < 0.5 ? -14 : 14) : 0;
+    const offsetX = -Math.cos(angle) * guardDist + sideNudge;
+    const offsetY = -Math.sin(angle) * guardDist;
+    const facing: 1 | -1 = offsetX >= 0 ? -1 : 1;
+
+    const defenderId = `def-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    eng.defenders.push({
+      id: defenderId,
+      targetUid: target.uid,
+      kind: defenderKind,
+      x: target.x + offsetX,
+      y: target.y + offsetY,
+      offsetX,
+      offsetY,
+      facing,
+      parried: false,
+      age: 0,
+      parryProgress: 0,
+    });
+
+    const wrongBulletSpeed = isLargeBullet ? 980 : 1050;
+    eng.bullets.push({
+      id: `bw-${Date.now()}-${Math.random()}`,
+      x: shipX + Math.cos(angle) * 24,
+      y: shipY + Math.sin(angle) * 24,
+      vx: Math.cos(angle) * wrongBulletSpeed,
+      vy: Math.sin(angle) * wrongBulletSpeed,
+      targetUid: target.uid,
+      angle,
+      color: '#dc2626',
+      isLarge: isLargeBullet,
+      isWrong: true,
+      deflected: false,
+      defenderId,
+    });
+  }, []);
+
+  const handleMediumSubmit = useCallback(() => {
+    const eng = engineRef.current;
+    if (!isMedium || eng.ended || eng.outOfHearts) return;
+
+    const target = getActiveTarget();
+    if (!target) return;
+
+    const typed = inputValue.trim().replace(/\s+/g, ' ');
+    if (!typed) return;
+
+    if (typed.toLowerCase() === target.word.english.trim().toLowerCase()) {
+      // Correct full word -> fire big cannon rocket!
+      target.pendingDestroy = true;
+      eng.correctCount += 1;
+      eng.currentTargetUid = null;
+      setInputValue('');
+      soundEngine.playShoot();
+
+      const shipX = eng.width / 2;
+      const shipY = eng.height - 26;
+      const angle = Math.atan2(target.y - shipY, target.x - shipX);
+      eng.shipAngle = angle;
+      eng.shipRecoil = 11;
+
+      const bigBulletSpeed = 1200;
+      eng.bullets.push({
+        id: `bl-${Date.now()}-${Math.random()}`,
+        x: shipX + Math.cos(angle) * 26,
+        y: shipY + Math.sin(angle) * 26,
+        vx: Math.cos(angle) * bigBulletSpeed,
+        vy: Math.sin(angle) * bigBulletSpeed,
+        targetUid: target.uid,
+        angle,
+        color: '#1e293b',
+        isLarge: true,
+        destroyOnHit: true,
+      });
+    } else {
+      // Wrong full word -> lose 1 heart & fire big wrong bullet blocked by a stickman!
+      setInputValue('');
+      triggerWrongFeedback();
+      eng.heartsLeft = Math.max(0, eng.heartsLeft - 1);
+      spawnWrongDefenderShot(target, true);
+
+      if (eng.heartsLeft <= 0) {
+        eng.outOfHearts = true;
+        eng.outOfHeartsAt = performance.now();
+      }
+    }
+
+    syncHud();
+    inputRef.current?.focus();
+  }, [inputValue, isMedium, spawnWrongDefenderShot, syncHud, triggerWrongFeedback]);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const eng = engineRef.current;
-    if (eng.ended) return;
+    if (eng.ended || eng.outOfHearts) return;
 
     const target = getActiveTarget();
     if (!target) {
       setInputValue('');
+      return;
+    }
+
+    // Medium mode: allow free typing of the whole word until Enter is pressed
+    if (isMedium) {
+      setInputValue(e.target.value);
       return;
     }
 
@@ -349,53 +498,7 @@ export function GameScreen({
         }
       } else {
         triggerWrongFeedback();
-
-        // Still fire a bullet, but spawn a random stickman defender (sword or shield) near the word to bat/bounce it away!
-        const shipX = eng.width / 2;
-        const shipY = eng.height - 26;
-        const angle = Math.atan2(target.y - shipY, target.x - shipX);
-        eng.shipAngle = angle;
-        eng.shipRecoil = 6;
-        soundEngine.playShoot();
-
-        const defenderKinds: StickDefenderKind[] = ['sword', 'shield', 'wand', 'ninja'];
-        const defenderKind = defenderKinds[Math.floor(Math.random() * defenderKinds.length)];
-        const guardDist = target.height / 2 + 24;
-        // Slight lateral offset so even straight-up shots show a clear side-facing silhouette
-        const sideNudge = Math.abs(Math.cos(angle)) < 0.2 ? (Math.random() < 0.5 ? -14 : 14) : 0;
-        const offsetX = -Math.cos(angle) * guardDist + sideNudge;
-        const offsetY = -Math.sin(angle) * guardDist;
-        const facing: 1 | -1 = offsetX >= 0 ? -1 : 1;
-
-        const defenderId = `def-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        eng.defenders.push({
-          id: defenderId,
-          targetUid: target.uid,
-          kind: defenderKind,
-          x: target.x + offsetX,
-          y: target.y + offsetY,
-          offsetX,
-          offsetY,
-          facing,
-          parried: false,
-          age: 0,
-          parryProgress: 0,
-        });
-
-        const wrongBulletSpeed = 1050;
-        eng.bullets.push({
-          id: `bw-${Date.now()}-${Math.random()}`,
-          x: shipX + Math.cos(angle) * 24,
-          y: shipY + Math.sin(angle) * 24,
-          vx: Math.cos(angle) * wrongBulletSpeed,
-          vy: Math.sin(angle) * wrongBulletSpeed,
-          targetUid: target.uid,
-          angle,
-          color: '#dc2626',
-          isWrong: true,
-          deflected: false,
-          defenderId,
-        });
+        spawnWrongDefenderShot(target, false);
         break;
       }
     }
@@ -412,6 +515,9 @@ export function GameScreen({
     if (e.key === 'Tab') {
       e.preventDefault();
       handleSkip();
+    } else if (e.key === 'Enter' && isMedium) {
+      e.preventDefault();
+      handleMediumSubmit();
     }
   };
 
@@ -490,10 +596,13 @@ export function GameScreen({
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, eng.width, eng.height);
 
-        // 1. Spawning logic (spaced out comfortably across height)
-        if (eng.pendingQueue.length > 0 && !eng.ended) {
+        // 1. Spawning logic (spaced out comfortably across height; scaled for Medium mode)
+        const spawnInterval = isMedium
+          ? Math.max(1.35, 2.9 / Math.sqrt(settings.mediumSpeedMultiplier))
+          : 2.9;
+        if (eng.pendingQueue.length > 0 && !eng.ended && !eng.outOfHearts) {
           eng.spawnTimer += dt;
-          if (eng.blocks.length === 0 || (eng.spawnTimer >= 2.9 && eng.blocks.length < 5)) {
+          if (eng.blocks.length === 0 || (eng.spawnTimer >= spawnInterval && eng.blocks.length < 5)) {
             eng.spawnTimer = 0;
             spawnWordBlock();
             syncHud();
@@ -506,10 +615,12 @@ export function GameScreen({
         const survivingBlocks: FallingBlock[] = [];
 
         for (const block of eng.blocks) {
-          block.y += block.speed * dt;
+          if (!block.pendingDestroy) {
+            block.y += block.speed * dt;
+          }
           block.hitJitter = Math.max(0, block.hitJitter - dt * 5);
 
-          if (block.y + block.height / 2 >= bottomLimit) {
+          if (!block.pendingDestroy && block.y + block.height / 2 >= bottomLimit) {
             // Reached bottom -> record for review, game continues!
             eng.missedCount += 1;
             eng.reviewItems.push({ word: block.word, reason: 'missed' });
@@ -529,9 +640,10 @@ export function GameScreen({
         }
         eng.blocks = survivingBlocks;
 
-        // 3. Identify closest target (largest Y)
+        // 3. Identify closest non-destroying target (largest Y)
         let targetBlock: FallingBlock | null = null;
         for (const b of eng.blocks) {
+          if (b.pendingDestroy) continue;
           if (!targetBlock || b.y > targetBlock.y) {
             targetBlock = b;
           }
@@ -759,12 +871,27 @@ export function GameScreen({
               const dx = dest.x - bullet.x;
               const dy = dest.y - bullet.y;
               const dist = Math.hypot(dx, dy);
-              if (dist < 22) {
-                dest.hitJitter = 1;
+              if (dist < (bullet.isLarge ? 26 : 22)) {
+                if (bullet.destroyOnHit) {
+                  // Heavy cannon shell destroys target block on impact!
+                  eng.explosions.push({
+                    id: `exp-${Date.now()}-${Math.random()}`,
+                    x: dest.x,
+                    y: dest.y,
+                    progress: 0,
+                    seed: Math.random() * 999,
+                    kind: 'destroy',
+                    label: dest.word.english,
+                  });
+                  eng.blocks = eng.blocks.filter((b) => b.uid !== dest.uid);
+                  soundEngine.playDestroy();
+                } else {
+                  dest.hitJitter = 1;
+                }
                 continue; // bullet hit target
               }
               const angle = Math.atan2(dy, dx);
-              const speed = 1350;
+              const speed = bullet.isLarge ? 1200 : 1350;
               bullet.vx = Math.cos(angle) * speed;
               bullet.vy = Math.sin(angle) * speed;
               bullet.angle = angle;
@@ -826,9 +953,34 @@ export function GameScreen({
         }
         drawDoodleSpaceship(ctx, shipX, shipY, eng.shipAngle, eng.shipRecoil, timeSec);
 
-        // 10. Check game completion
-        if (
+        // 12. Check game completion (either out of hearts OR all words resolved)
+        if (!eng.ended && eng.outOfHearts && eng.outOfHeartsAt !== null) {
+          if (now - eng.outOfHeartsAt >= 680) {
+            eng.ended = true;
+            // Collect remaining unresolved words to review
+            const extraReview: ReviewItem[] = [
+              ...eng.blocks
+                .filter((b) => !b.pendingDestroy)
+                .map((b) => ({ word: b.word, reason: 'out_of_hearts' as const })),
+              ...eng.pendingQueue.map((w) => ({ word: w, reason: 'out_of_hearts' as const })),
+            ];
+            soundEngine.playSkip();
+            onFinishGame({
+              mode: settings.mode,
+              totalWords: words.length,
+              correctCount: eng.correctCount,
+              skippedCount: eng.skippedCount,
+              missedCount: eng.missedCount,
+              outOfHearts: true,
+              remainingHearts: 0,
+              maxHearts: settings.mediumHearts,
+              reviewItems: [...eng.reviewItems, ...extraReview],
+            });
+            return;
+          }
+        } else if (
           !eng.ended &&
+          !eng.outOfHearts &&
           eng.pendingQueue.length === 0 &&
           eng.blocks.length === 0
         ) {
@@ -838,10 +990,14 @@ export function GameScreen({
             eng.ended = true;
             soundEngine.playFinish();
             onFinishGame({
+              mode: settings.mode,
               totalWords: words.length,
               correctCount: eng.correctCount,
               skippedCount: eng.skippedCount,
               missedCount: eng.missedCount,
+              outOfHearts: false,
+              remainingHearts: isMedium ? eng.heartsLeft : undefined,
+              maxHearts: isMedium ? settings.mediumHearts : undefined,
               reviewItems: eng.reviewItems,
             });
             return;
@@ -854,20 +1010,50 @@ export function GameScreen({
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [onFinishGame, spawnWordBlock, syncHud, words.length]);
+  }, [isMedium, onFinishGame, settings.mediumHearts, settings.mediumSpeedMultiplier, settings.mode, spawnWordBlock, syncHud, words.length]);
 
   return (
     <div
-      className="h-dvh overflow-hidden flex flex-col notebook-paper relative select-none"
+      className="h-dvh overflow-hidden relative select-none bg-[#fcf9f2]"
       onClick={() => inputRef.current?.focus()}
     >
-      <NotebookBinderHoles />
+      {/* Whole-screen shake container */}
+      <div
+        className={`h-full w-full flex flex-col notebook-paper relative ${
+          wrongShake ? 'animate-screen-hit' : ''
+        }`}
+      >
+        <NotebookBinderHoles />
 
-      {/* Centered, focused notebook play column */}
-      <div className="flex-1 min-h-0 w-full max-w-[820px] mx-auto flex flex-col relative lg:border-x lg:border-dashed lg:border-slate-400/50">
+        {/* Centered, focused notebook play column */}
+        <div className="flex-1 min-h-0 w-full max-w-[820px] mx-auto flex flex-col relative lg:border-x lg:border-dashed lg:border-slate-400/50">
         {/* Floating minimal corner HUD so canvas uses full top-to-bottom height */}
         <header className="pointer-events-none absolute top-1.5 left-9 sm:left-16 lg:left-3 right-3 flex items-center justify-between gap-2 z-20">
-          <div className="pointer-events-auto bg-[#fcf9f2]/88 px-2.5 py-0.5 rounded-md border border-slate-300/80 flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-slate-700 tabular-nums whitespace-nowrap">
+          <div className="pointer-events-auto bg-[#fcf9f2]/90 px-2.5 py-0.5 rounded-md border border-slate-300/80 flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-slate-700 tabular-nums whitespace-nowrap overflow-hidden">
+            {isMedium && (
+              <>
+                <span className="inline-flex items-center gap-1" title={`Còn ${hudState.heartsLeft}/${hudState.maxHearts} tim`}>
+                  {hudState.maxHearts <= 6 ? (
+                    Array.from({ length: hudState.maxHearts }).map((_, idx) => (
+                      <Heart
+                        key={idx}
+                        className={`w-3.5 h-3.5 ${
+                          idx < hudState.heartsLeft
+                            ? 'fill-red-500 text-red-600'
+                            : 'fill-slate-200 text-slate-400'
+                        }`}
+                      />
+                    ))
+                  ) : (
+                    <span className="inline-flex items-center gap-1 font-bold text-red-600">
+                      <Heart className="w-3.5 h-3.5 fill-red-500 text-red-600" />
+                      {hudState.heartsLeft}/{hudState.maxHearts}
+                    </span>
+                  )}
+                </span>
+                <span aria-hidden="true">·</span>
+              </>
+            )}
             <span>
               Đã bắn: <strong className="text-emerald-700">{hudState.correct}</strong>
             </span>
@@ -929,7 +1115,9 @@ export function GameScreen({
                 onKeyDown={handleKeyDown}
                 placeholder={
                   hudState.targetVietnamese
-                    ? `Gõ tiếng Anh cho "${hudState.targetVietnamese}"...`
+                    ? isMedium
+                      ? `Nhập đủ "${hudState.targetVietnamese}" rồi Enter...`
+                      : `Gõ tiếng Anh cho "${hudState.targetVietnamese}"...`
                     : 'Đang chuẩn bị mục tiêu...'
                 }
                 aria-label="Nhập từ tiếng Anh tương ứng với mục tiêu"
@@ -938,16 +1126,32 @@ export function GameScreen({
                 autoCapitalize="none"
                 spellCheck={false}
                 lang="en"
-                className={`sketch-input w-full pl-3 pr-12 py-1 text-base sm:text-lg font-bold tracking-wide text-slate-900 placeholder:text-slate-500 placeholder:font-normal ${
+                className={`sketch-input w-full pl-3 ${isMedium ? 'pr-3' : 'pr-12'} py-1 text-base sm:text-lg font-bold tracking-wide text-slate-900 placeholder:text-slate-500 placeholder:font-normal ${
                   wrongShake ? 'border-red-600 bg-red-50/90' : ''
                 }`}
               />
-              {hudState.targetVietnamese && (
+              {!isMedium && hudState.targetVietnamese && (
                 <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 tabular-nums">
                   {hudState.targetTypedCount}/{hudState.targetTotalLength}
                 </span>
               )}
             </div>
+
+            {isMedium && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleMediumSubmit();
+                }}
+                disabled={!hudState.targetVietnamese || !inputValue.trim()}
+                title="Bắn đạn lớn (phím Enter)"
+                className="sketch-btn bg-sky-200 hover:bg-sky-300 text-slate-900 font-display text-sm px-3 py-1 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Bắn</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -964,7 +1168,20 @@ export function GameScreen({
             </button>
           </div>
         </div>
+        </div>
       </div>
+
+      {/* Dizzy corner blur + dark vignette overlay after getting hit */}
+      {dizzyHitKey > 0 && (
+        <div
+          key={dizzyHitKey}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-30 animate-dizzy-vignette"
+        >
+          <div className="absolute inset-0 dizzy-vignette-blur" />
+          <div className="absolute inset-0 dizzy-vignette-dark" />
+        </div>
+      )}
     </div>
   );
 }

@@ -2,9 +2,17 @@ import { useEffect, useState } from 'react';
 import { GameScreen } from './components/GameScreen';
 import { SetupScreen } from './components/SetupScreen';
 import { SummaryScreen } from './components/SummaryScreen';
-import { AppScreen, GameResult, STARTER_VOCAB, VocabWord } from './types/vocab';
+import {
+  AppScreen,
+  DEFAULT_GAME_SETTINGS,
+  GameResult,
+  GameSettings,
+  STARTER_VOCAB,
+  VocabWord,
+} from './types/vocab';
 
 const STORAGE_KEY = 'vocab_shooter_words_v1';
+const SETTINGS_STORAGE_KEY = 'vocab_shooter_settings_v1';
 
 function loadInitialWords(): VocabWord[] {
   try {
@@ -25,8 +33,32 @@ function loadInitialWords(): VocabWord[] {
   return STARTER_VOCAB;
 }
 
+function loadInitialSettings(): GameSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return DEFAULT_GAME_SETTINGS;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      const mode = parsed.mode === 'medium' ? 'medium' : 'easy';
+      const mediumHearts =
+        typeof parsed.mediumHearts === 'number'
+          ? Math.max(1, Math.min(10, Math.round(parsed.mediumHearts)))
+          : DEFAULT_GAME_SETTINGS.mediumHearts;
+      const mediumSpeedMultiplier =
+        typeof parsed.mediumSpeedMultiplier === 'number'
+          ? Math.max(1.2, Math.min(2.5, Number(parsed.mediumSpeedMultiplier.toFixed(1))))
+          : DEFAULT_GAME_SETTINGS.mediumSpeedMultiplier;
+      return { mode, mediumHearts, mediumSpeedMultiplier };
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return DEFAULT_GAME_SETTINGS;
+}
+
 export default function App() {
   const [words, setWords] = useState<VocabWord[]>(loadInitialWords);
+  const [settings, setSettings] = useState<GameSettings>(loadInitialSettings);
   const [screen, setScreen] = useState<AppScreen>('SETUP');
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
   const [sessionKey, setSessionKey] = useState(0);
@@ -38,6 +70,14 @@ export default function App() {
       // Ignore storage quota errors
     }
   }, [words]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [settings]);
 
   const handleAddWord = (english: string, vietnamese: string) => {
     const newWord: VocabWord = {
@@ -93,6 +133,7 @@ export default function App() {
       <GameScreen
         key={sessionKey}
         words={words}
+        settings={settings}
         onFinishGame={handleFinishGame}
         onExitToSetup={handleBackToSetup}
       />
@@ -112,6 +153,8 @@ export default function App() {
   return (
     <SetupScreen
       words={words}
+      settings={settings}
+      onUpdateSettings={setSettings}
       onAddWord={handleAddWord}
       onDeleteWord={handleDeleteWord}
       onClearAll={handleClearAll}

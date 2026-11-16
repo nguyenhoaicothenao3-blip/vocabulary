@@ -295,6 +295,9 @@ export function drawInkBullet(ctx: CanvasRenderingContext2D, bullet: InkBullet) 
 
   if (bullet.frozen) {
     // Heavy sketched ice cube encasing the bullet as it plummets straight down
+    if (bullet.isLarge) {
+      ctx.scale(1.42, 1.42);
+    }
     ctx.rotate(bullet.iceTilt ?? 0.08);
 
     // Subtle vertical speed lines above ice cube
@@ -348,7 +351,66 @@ export function drawInkBullet(ctx: CanvasRenderingContext2D, bullet: InkBullet) 
 
   ctx.rotate(bullet.angle);
 
-  // Small ink stroke / pen dash with slight tail
+  if (bullet.isLarge) {
+    // Distinct heavy ink rocket/cannon shell for Medium mode
+    // Exhaust scribble flame at tail
+    ctx.fillStyle = bullet.isWrong ? '#fca5a5' : '#fdba74';
+    ctx.strokeStyle = bullet.isWrong ? '#dc2626' : '#ea580c';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-12, -4);
+    ctx.lineTo(-21, 0);
+    ctx.lineTo(-12, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Small tail fins
+    ctx.fillStyle = bullet.isWrong ? '#f87171' : '#93c5fd';
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(-8, -4.5);
+    ctx.lineTo(-14, -9);
+    ctx.lineTo(-11, -3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-8, 4.5);
+    ctx.lineTo(-14, 9);
+    ctx.lineTo(-11, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Heavy capsule / shell body
+    ctx.fillStyle = bullet.isWrong ? '#fecaca' : '#fef08a';
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-11, -5.5);
+    ctx.lineTo(4, -5.5);
+    ctx.quadraticCurveTo(15, 0, 4, 5.5);
+    ctx.lineTo(-11, 5.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Nose band accent
+    ctx.fillStyle = bullet.isWrong ? '#dc2626' : '#2563eb';
+    ctx.beginPath();
+    ctx.moveTo(4, -5);
+    ctx.quadraticCurveTo(14, 0, 4, 5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+    return;
+  }
+
+  // Small ink stroke / pen dash with slight tail (Easy mode)
   ctx.strokeStyle = bullet.isWrong ? '#dc2626' : bullet.color;
   ctx.lineWidth = 3.2;
   ctx.lineCap = 'round';
