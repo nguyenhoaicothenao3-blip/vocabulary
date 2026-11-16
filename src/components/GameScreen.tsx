@@ -7,6 +7,9 @@ import {
   InkBullet,
   MARKER_COLORS,
   ReviewItem,
+  Shuriken,
+  StickDefender,
+  StickDefenderKind,
   VocabWord,
 } from '../types/vocab';
 import {
@@ -14,6 +17,8 @@ import {
   drawDoodleSpaceship,
   drawFallingBlock,
   drawInkBullet,
+  drawShuriken,
+  drawStickDefender,
   wrapVietnameseText,
 } from '../utils/sketchDraw';
 import { soundEngine } from '../utils/sound';
@@ -66,6 +71,8 @@ export function GameScreen({
     pendingQueue: VocabWord[];
     blocks: FallingBlock[];
     bullets: InkBullet[];
+    defenders: StickDefender[];
+    shurikens: Shuriken[];
     explosions: DoodleExplosion[];
     correctCount: number;
     skippedCount: number;
@@ -85,6 +92,8 @@ export function GameScreen({
     pendingQueue: shuffleArray(words),
     blocks: [],
     bullets: [],
+    defenders: [],
+    shurikens: [],
     explosions: [],
     correctCount: 0,
     skippedCount: 0,
@@ -340,6 +349,53 @@ export function GameScreen({
         }
       } else {
         triggerWrongFeedback();
+
+        // Still fire a bullet, but spawn a random stickman defender (sword or shield) near the word to bat/bounce it away!
+        const shipX = eng.width / 2;
+        const shipY = eng.height - 26;
+        const angle = Math.atan2(target.y - shipY, target.x - shipX);
+        eng.shipAngle = angle;
+        eng.shipRecoil = 6;
+        soundEngine.playShoot();
+
+        const defenderKinds: StickDefenderKind[] = ['sword', 'shield', 'wand', 'ninja'];
+        const defenderKind = defenderKinds[Math.floor(Math.random() * defenderKinds.length)];
+        const guardDist = target.height / 2 + 24;
+        // Slight lateral offset so even straight-up shots show a clear side-facing silhouette
+        const sideNudge = Math.abs(Math.cos(angle)) < 0.2 ? (Math.random() < 0.5 ? -14 : 14) : 0;
+        const offsetX = -Math.cos(angle) * guardDist + sideNudge;
+        const offsetY = -Math.sin(angle) * guardDist;
+        const facing: 1 | -1 = offsetX >= 0 ? -1 : 1;
+
+        const defenderId = `def-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        eng.defenders.push({
+          id: defenderId,
+          targetUid: target.uid,
+          kind: defenderKind,
+          x: target.x + offsetX,
+          y: target.y + offsetY,
+          offsetX,
+          offsetY,
+          facing,
+          parried: false,
+          age: 0,
+          parryProgress: 0,
+        });
+
+        const wrongBulletSpeed = 1050;
+        eng.bullets.push({
+          id: `bw-${Date.now()}-${Math.random()}`,
+          x: shipX + Math.cos(angle) * 24,
+          y: shipY + Math.sin(angle) * 24,
+          vx: Math.cos(angle) * wrongBulletSpeed,
+          vy: Math.sin(angle) * wrongBulletSpeed,
+          targetUid: target.uid,
+          angle,
+          color: '#dc2626',
+          isWrong: true,
+          deflected: false,
+          defenderId,
+        });
         break;
       }
     }
@@ -494,44 +550,246 @@ export function GameScreen({
         eng.shipAngle += (desiredAngle - eng.shipAngle) * Math.min(1, dt * 12);
         eng.shipRecoil = Math.max(0, eng.shipRecoil - dt * 40);
 
-        // 5. Update bullets
-        const activeBullets: InkBullet[] = [];
-        for (const bullet of eng.bullets) {
-          const dest = eng.blocks.find((b) => b.uid === bullet.targetUid);
-          if (dest) {
-            const dx = dest.x - bullet.x;
-            const dy = dest.y - bullet.y;
+        // 5. Update stick-figure defenders
+        const activeDefenders: StickDefender[] = [];
+        for (const def of eng.defenders) {
+          def.age += dt;
+          const host = eng.blocks.find((b) => b.uid === def.targetUid);
+          if (host) {
+            def.x = host.x + def.offsetX;
+            def.y = host.y + def.offsetY;
+          }
+          if (def.parried) {
+            def.parryProgress += dt * 1.9;
+            if (def.parryProgress < 1) {
+              activeDefenders.push(def);
+            }
+          } else if (host || def.age < 0.65) {
+            activeDefenders.push(def);
+          }
+        }
+        eng.defenders = activeDefenders;
+
+        // 6. Update shurikens & mid-air bullet collisions
+        const consumedBulletIds = new Set<string>();
+        const activeShurikens: Shuriken[] = [];
+        for (const s of eng.shurikens) {
+          s.spin += dt * 24;
+          const targetBullet = eng.bullets.find(
+            (b) => b.id === s.bulletId && !b.deflected && !b.frozen && !consumedBulletIds.has(b.id)
+          );
+          if (targetBullet) {
+            const dx = targetBullet.x - s.x;
+            const dy = targetBullet.y - s.y;
             const dist = Math.hypot(dx, dy);
             if (dist < 22) {
-              dest.hitJitter = 1;
-              continue; // bullet hit target
+              // Mid-air collision: both vanish into white ninja smoke!
+              consumedBulletIds.add(targetBullet.id);
+              const mx = (s.x + targetBullet.x) / 2;
+              const my = (s.y + targetBullet.y) / 2;
+              soundEngine.playDeflect('ninja');
+              eng.explosions.push({
+                id: `smoke-${Date.now()}-${Math.random()}`,
+                x: mx,
+                y: my,
+                progress: 0,
+                seed: Math.random() * 500,
+                kind: 'smoke',
+                label: 'Bùm!',
+              });
+              continue;
             }
             const angle = Math.atan2(dy, dx);
-            const speed = 1350;
-            bullet.vx = Math.cos(angle) * speed;
-            bullet.vy = Math.sin(angle) * speed;
-            bullet.angle = angle;
+            const shurikenSpeed = 860;
+            s.vx = Math.cos(angle) * shurikenSpeed;
+            s.vy = Math.sin(angle) * shurikenSpeed;
           }
-          bullet.x += bullet.vx * dt;
-          bullet.y += bullet.vy * dt;
+          s.x += s.vx * dt;
+          s.y += s.vy * dt;
 
           if (
-            bullet.x >= -20 &&
-            bullet.x <= eng.width + 20 &&
-            bullet.y >= -20 &&
-            bullet.y <= eng.height + 20
+            s.x >= -30 &&
+            s.x <= eng.width + 30 &&
+            s.y >= -30 &&
+            s.y <= eng.height + 30
+          ) {
+            activeShurikens.push(s);
+          }
+        }
+        eng.shurikens = activeShurikens;
+
+        // 7. Update bullets
+        const activeBullets: InkBullet[] = [];
+        for (const bullet of eng.bullets) {
+          if (consumedBulletIds.has(bullet.id)) continue;
+
+          if (bullet.frozen) {
+            // Frozen into a heavy ice cube -> falls straight down under heavy gravity
+            bullet.vx = 0;
+            bullet.vy += 1280 * dt;
+            bullet.y += bullet.vy * dt;
+            if (bullet.y >= bottomLimit + 26) {
+              eng.explosions.push({
+                id: `ice-land-${Date.now()}-${Math.random()}`,
+                x: bullet.x,
+                y: bottomLimit + 20,
+                progress: 0,
+                seed: Math.random() * 500,
+                kind: 'freeze',
+              });
+              continue;
+            }
+          } else if (bullet.deflected) {
+            // Deflected bullet arcs away with slight gravity
+            bullet.vy += 620 * dt;
+            bullet.x += bullet.vx * dt;
+            bullet.y += bullet.vy * dt;
+            bullet.angle = Math.atan2(bullet.vy, bullet.vx);
+          } else if (bullet.isWrong) {
+            const def = eng.defenders.find((d) => d.id === bullet.defenderId);
+            if (def && !def.parried) {
+              const guardX = def.x + def.facing * 8;
+              const guardY = def.y;
+              const dx = guardX - bullet.x;
+              const dy = guardY - bullet.y;
+              const dist = Math.hypot(dx, dy);
+
+              if (def.kind === 'wand') {
+                if (dist < 64) {
+                  // Wizard waves wand & shoots ice ray -> freezes bullet into heavy ice cube!
+                  bullet.frozen = true;
+                  bullet.vx = 0;
+                  bullet.vy = 55;
+                  bullet.iceTilt = (Math.random() - 0.5) * 0.22;
+
+                  def.parried = true;
+                  def.parryProgress = 0;
+                  def.beamTargetX = bullet.x;
+                  def.beamTargetY = bullet.y;
+
+                  soundEngine.playDeflect('wand');
+                  eng.explosions.push({
+                    id: `freeze-${Date.now()}-${Math.random()}`,
+                    x: bullet.x,
+                    y: bullet.y,
+                    progress: 0,
+                    seed: Math.random() * 500,
+                    kind: 'freeze',
+                    label: 'Đóng băng!',
+                  });
+                } else {
+                  const angle = Math.atan2(dy, dx);
+                  const speed = 1050;
+                  bullet.vx = Math.cos(angle) * speed;
+                  bullet.vy = Math.sin(angle) * speed;
+                  bullet.angle = angle;
+                  bullet.x += bullet.vx * dt;
+                  bullet.y += bullet.vy * dt;
+                }
+              } else if (def.kind === 'ninja') {
+                // Ninja throws a small shuriken out to intercept bullet mid-air!
+                if (!def.threwShuriken && (dist < 175 || def.age >= 0.08)) {
+                  def.threwShuriken = true;
+                  def.parried = true;
+                  def.parryProgress = 0;
+
+                  const sx = def.x + def.facing * 10;
+                  const sy = def.y;
+                  const sAngle = Math.atan2(bullet.y - sy, bullet.x - sx);
+                  const shurikenSpeed = 860;
+                  eng.shurikens.push({
+                    id: `sh-${Date.now()}-${Math.random()}`,
+                    x: sx,
+                    y: sy,
+                    vx: Math.cos(sAngle) * shurikenSpeed,
+                    vy: Math.sin(sAngle) * shurikenSpeed,
+                    spin: 0,
+                    bulletId: bullet.id,
+                  });
+                }
+                const angle = Math.atan2(dy, dx);
+                const speed = 960;
+                bullet.vx = Math.cos(angle) * speed;
+                bullet.vy = Math.sin(angle) * speed;
+                bullet.angle = angle;
+                bullet.x += bullet.vx * dt;
+                bullet.y += bullet.vy * dt;
+              } else {
+                // Sword or Shield parry!
+                if (dist < 22) {
+                  bullet.deflected = true;
+                  def.parried = true;
+                  def.parryProgress = 0;
+
+                  const side = Math.random() < 0.5 ? 1 : -1;
+                  const bounceAngle = bullet.angle + Math.PI + side * (0.55 + Math.random() * 0.65);
+                  const bounceSpeed = 860;
+                  bullet.vx = Math.cos(bounceAngle) * bounceSpeed;
+                  bullet.vy = Math.sin(bounceAngle) * bounceSpeed;
+                  bullet.angle = bounceAngle;
+
+                  soundEngine.playDeflect(def.kind);
+                  eng.explosions.push({
+                    id: `deflect-${Date.now()}-${Math.random()}`,
+                    x: guardX,
+                    y: guardY,
+                    progress: 0,
+                    seed: Math.random() * 500,
+                    kind: 'deflect',
+                    label: def.kind === 'sword' ? 'Keng!' : 'Bộp!',
+                  });
+                } else {
+                  const angle = Math.atan2(dy, dx);
+                  const speed = 1050;
+                  bullet.vx = Math.cos(angle) * speed;
+                  bullet.vy = Math.sin(angle) * speed;
+                  bullet.angle = angle;
+                  bullet.x += bullet.vx * dt;
+                  bullet.y += bullet.vy * dt;
+                }
+              }
+            } else {
+              // If ninja already threw shuriken, let bullet keep moving toward collision point!
+              bullet.x += bullet.vx * dt;
+              bullet.y += bullet.vy * dt;
+            }
+          } else {
+            const dest = eng.blocks.find((b) => b.uid === bullet.targetUid);
+            if (dest) {
+              const dx = dest.x - bullet.x;
+              const dy = dest.y - bullet.y;
+              const dist = Math.hypot(dx, dy);
+              if (dist < 22) {
+                dest.hitJitter = 1;
+                continue; // bullet hit target
+              }
+              const angle = Math.atan2(dy, dx);
+              const speed = 1350;
+              bullet.vx = Math.cos(angle) * speed;
+              bullet.vy = Math.sin(angle) * speed;
+              bullet.angle = angle;
+            }
+            bullet.x += bullet.vx * dt;
+            bullet.y += bullet.vy * dt;
+          }
+
+          if (
+            bullet.x >= -30 &&
+            bullet.x <= eng.width + 30 &&
+            bullet.y >= -30 &&
+            bullet.y <= eng.height + 30
           ) {
             activeBullets.push(bullet);
           }
         }
         eng.bullets = activeBullets;
 
-        // 6. Update explosions
+        // 8. Update explosions
         eng.explosions = eng.explosions
           .map((exp) => ({ ...exp, progress: exp.progress + dt * 1.9 }))
           .filter((exp) => exp.progress < 1);
 
-        // 7. Draw subtle dashed floor line in pencil
+        // 9. Draw subtle dashed floor line in pencil
         const floorLeftMargin = Math.max(12, (window.innerWidth < 640 ? 28 : 64) - canvas.getBoundingClientRect().left);
         ctx.save();
         ctx.strokeStyle = 'rgba(100, 116, 139, 0.45)';
@@ -543,7 +801,7 @@ export function GameScreen({
         ctx.stroke();
         ctx.restore();
 
-        // 8. Draw non-target blocks first, then target block on top so red ring stands out
+        // 10. Draw non-target blocks first, then target block on top so red ring stands out
         for (const block of eng.blocks) {
           if (!targetBlock || block.uid !== targetBlock.uid) {
             drawFallingBlock(ctx, block, false, timeSec);
@@ -553,7 +811,13 @@ export function GameScreen({
           drawFallingBlock(ctx, targetBlock, true, timeSec);
         }
 
-        // 9. Draw bullets, explosions, and doodle spaceship
+        // 11. Draw stick-figure defenders, shurikens, bullets, explosions, and doodle spaceship
+        for (const def of eng.defenders) {
+          drawStickDefender(ctx, def);
+        }
+        for (const s of eng.shurikens) {
+          drawShuriken(ctx, s);
+        }
         for (const bullet of eng.bullets) {
           drawInkBullet(ctx, bullet);
         }

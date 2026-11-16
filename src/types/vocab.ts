@@ -37,6 +37,8 @@ export interface FallingBlock {
   lines: string[];
 }
 
+export type StickDefenderKind = 'sword' | 'shield' | 'wand' | 'ninja';
+
 export interface InkBullet {
   id: string;
   x: number;
@@ -46,6 +48,38 @@ export interface InkBullet {
   targetUid: string;
   angle: number;
   color: string;
+  isWrong?: boolean;
+  deflected?: boolean;
+  frozen?: boolean;
+  iceTilt?: number;
+  defenderId?: string;
+}
+
+export interface StickDefender {
+  id: string;
+  targetUid: string;
+  kind: StickDefenderKind;
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  facing: 1 | -1;
+  parried: boolean;
+  age: number;
+  parryProgress: number;
+  threwShuriken?: boolean;
+  beamTargetX?: number;
+  beamTargetY?: number;
+}
+
+export interface Shuriken {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  spin: number;
+  bulletId: string;
 }
 
 export interface DoodleExplosion {
@@ -54,7 +88,7 @@ export interface DoodleExplosion {
   y: number;
   progress: number; // 0 to 1
   seed: number;
-  kind: 'destroy' | 'miss' | 'skip';
+  kind: 'destroy' | 'miss' | 'skip' | 'deflect' | 'freeze' | 'smoke';
   label?: string;
 }
 
