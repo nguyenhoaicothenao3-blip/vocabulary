@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --paper-bg: #fcf9f2;
+    --paper-line: rgba(147, 197, 253, 0.55);
+    --paper-margin: rgba(225, 29, 72, 0.45);
+    --ink-primary: #1e293b;
+    --ink-blue: #1d4ed8;
+    --ink-red: #dc2626;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'Patrick Hand', cursive, sans-serif;
+    background-color: var(--paper-bg);
+    color: var(--ink-primary);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: 'Pangolin', cursive, sans-serif;
+  }
+}
+
+/* Ruled notebook paper background with left red margin */
+.notebook-paper {
+  background-color: var(--paper-bg);
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 54px,
+      var(--paper-margin) 54px,
+      var(--paper-margin) 55.5px,
+      transparent 55.5px,
+      transparent 58px,
+      rgba(225, 29, 72, 0.22) 58px,
+      rgba(225, 29, 72, 0.22) 59px,
+      transparent 59px
+    ),
+    repeating-linear-gradient(
+      180deg,
+      transparent 0,
+      transparent 31px,
+      var(--paper-line) 31px,
+      var(--paper-line) 32px
+    );
+  background-attachment: local;
+}
+
+@media (max-width: 640px) {
+  .notebook-paper {
+    background-image:
+      linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 24px,
+        var(--paper-margin) 24px,
+        var(--paper-margin) 25.5px,
+        transparent 25.5px
+      ),
+      repeating-linear-gradient(
+        180deg,
+        transparent 0,
+        transparent 31px,
+        var(--paper-line) 31px,
+        var(--paper-line) 32px
+      );
+  }
+}
+
+/* Hand-drawn wobbly borders & sticker buttons */
+.sketch-box {
+  border: 2.5px solid #1e293b;
+  border-radius: 16px 22px 14px 20px / 20px 14px 22px 16px;
+  box-shadow: 3px 3px 0px #1e293b;
+}
+
+.sketch-box-sm {
+  border: 2px solid #1e293b;
+  border-radius: 12px 16px 10px 14px / 14px 10px 16px 12px;
+  box-shadow: 2px 2px 0px #1e293b;
+}
+
+.sketch-btn {
+  border: 2.5px solid #1e293b;
+  border-radius: 14px 18px 12px 16px / 16px 12px 18px 14px;
+  box-shadow: 3px 3px 0px #1e293b;
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sketch-btn:hover:not(:disabled) {
+  transform: translate(-1px, -1px) rotate(-0.6deg);
+  box-shadow: 4px 4px 0px #1e293b;
+}
+
+.sketch-btn:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px #1e293b;
+}
+
+.sketch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sketch-input {
+  border: 2.5px solid #1e293b;
+  border-radius: 10px 15px 12px 14px / 14px 10px 15px 11px;
+  background-color: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 1.5px 1.5px 0px rgba(30, 41, 59, 0.08);
+}
+
+.sketch-input:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.18);
+}
+
+@keyframes doodle-shake {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  20% { transform: translateX(-5px) rotate(-1deg); }
+  40% { transform: translateX(5px) rotate(1deg); }
+  60% { transform: translateX(-4px) rotate(-0.5deg); }
+  80% { transform: translateX(4px) rotate(0.5deg); }
+}
+
+.animate-doodle-shake {
+  animation: doodle-shake 260ms ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sketch-btn,
+  .animate-doodle-shake {
+    transition: none;
+    animation: none;
+  }
+}
