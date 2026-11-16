@@ -63,6 +63,7 @@ export function GameScreen({
 
   const [inputValue, setInputValue] = useState('');
   const [wrongShake, setWrongShake] = useState(false);
+  const [screenHitCount, setScreenHitCount] = useState(0);
   const [dizzyHitKey, setDizzyHitKey] = useState(0);
   const [muted, setMuted] = useState(soundEngine.muted);
   const [hudState, setHudState] = useState<{
@@ -323,37 +324,52 @@ export function GameScreen({
   }, [syncHud]);
 
   const wrongTimerRef = useRef<number | null>(null);
+  const screenHitTimerRef = useRef<number | null>(null);
   const dizzyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
       if (wrongTimerRef.current !== null) window.clearTimeout(wrongTimerRef.current);
+      if (screenHitTimerRef.current !== null) window.clearTimeout(screenHitTimerRef.current);
       if (dizzyTimerRef.current !== null) window.clearTimeout(dizzyTimerRef.current);
     };
   }, []);
 
   const triggerWrongFeedback = useCallback(() => {
     soundEngine.playWrongKey();
-    setWrongShake(false);
+
     if (wrongTimerRef.current !== null) {
       window.clearTimeout(wrongTimerRef.current);
     }
-    if (dizzyTimerRef.current !== null) {
-      window.clearTimeout(dizzyTimerRef.current);
-    }
-    requestAnimationFrame(() => {
-      setWrongShake(true);
+
+    setWrongShake(true);
+    wrongTimerRef.current = window.setTimeout(() => {
+      setWrongShake(false);
+      wrongTimerRef.current = null;
+    }, 300);
+
+    // Whole-screen shake & dizzy corner vignette only trigger in Medium mode (when losing a heart)
+    if (isMedium) {
+      if (screenHitTimerRef.current !== null) {
+        window.clearTimeout(screenHitTimerRef.current);
+      }
+      if (dizzyTimerRef.current !== null) {
+        window.clearTimeout(dizzyTimerRef.current);
+      }
+
+      setScreenHitCount((c) => c + 1);
       setDizzyHitKey((k) => k + 1);
-      wrongTimerRef.current = window.setTimeout(() => {
-        setWrongShake(false);
-        wrongTimerRef.current = null;
-      }, 470);
+
+      screenHitTimerRef.current = window.setTimeout(() => {
+        setScreenHitCount(0);
+        screenHitTimerRef.current = null;
+      }, 490);
       dizzyTimerRef.current = window.setTimeout(() => {
         setDizzyHitKey(0);
         dizzyTimerRef.current = null;
       }, 920);
-    });
-  }, []);
+    }
+  }, [isMedium]);
 
   const spawnWrongDefenderShot = useCallback((target: FallingBlock, isLargeBullet: boolean) => {
     const eng = engineRef.current;
@@ -539,7 +555,7 @@ export function GameScreen({
         return;
       }
 
-      if (isComposing || nextVal.length < inputValue.normalize('NFC').length) {
+      if (nextVal.length < inputValue.normalize('NFC').length) {
         setInputValue(nextRaw);
         syncHud();
         return;
@@ -547,7 +563,14 @@ export function GameScreen({
 
       const expectedBase = stripVietnameseTones(expected);
       const nextBase = stripVietnameseTones(nextVal);
-      if (expectedBase.startsWith(nextBase)) {
+      const lastChar = nextBase.slice(-1);
+      const isTelexOrVniModifier =
+        isComposing &&
+        nextBase.length > 0 &&
+        expectedBase.startsWith(nextBase.slice(0, -1)) &&
+        /[sfrxjwaeod0-9]/i.test(lastChar);
+
+      if (expectedBase.startsWith(nextBase) || isTelexOrVniModifier) {
         // Still composing accents/tones on a valid Vietnamese base prefix
         setInputValue(nextRaw);
       } else {
@@ -563,8 +586,12 @@ export function GameScreen({
     const validPrefix = expected.slice(0, target.typedCount);
     const nextVal = e.target.value;
 
-    // Ignore backspacing already-landed bullets
+    // Ignore backspacing already-landed bullets, but detect IME-mutated wrong characters of equal length
     if (nextVal.length <= validPrefix.length) {
+      if (nextVal.length === validPrefix.length && nextVal.toLowerCase() !== validPrefix.toLowerCase()) {
+        triggerWrongFeedback();
+        spawnWrongDefenderShot(target, false);
+      }
       setInputValue(validPrefix);
       return;
     }
@@ -1141,7 +1168,11 @@ export function GameScreen({
       {/* Whole-screen shake container */}
       <div
         className={`h-full w-full flex flex-col notebook-paper relative ${
-          wrongShake ? 'animate-screen-hit' : ''
+          screenHitCount === 0
+            ? ''
+            : screenHitCount % 2 === 1
+            ? 'animate-screen-hit-a'
+            : 'animate-screen-hit-b'
         }`}
       >
         <NotebookBinderHoles />
@@ -1226,7 +1257,6 @@ export function GameScreen({
           <div className="max-w-lg mx-auto flex items-stretch gap-2">
             <div
               className={`relative flex-1 ${wrongShake ? 'animate-doodle-shake' : ''}`}
-              onAnimationEnd={() => setWrongShake(false)}
             >
               <input
                 ref={inputRef}
